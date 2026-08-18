@@ -1,4 +1,9 @@
 {
-  "assets": "./",
-  "functions": "./functions"
+  "assets": {
+    "directory": "./",
+    "notFoundStrategy": "404Page"
+  },
+  "functions": "./functions",
+  "installCommand": "",
+  "buildCommand": ""
 }
