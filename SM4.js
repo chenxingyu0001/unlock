@@ -226,3 +226,4 @@ function getTime(){
     console.log(u)
     return u;
 }
+export { encryptData_CBC };
