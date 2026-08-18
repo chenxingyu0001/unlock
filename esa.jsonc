@@ -1,9 +1,11 @@
 {
   "assets": {
-    "directory": "./",
-    "notFoundStrategy": "404Page"
+    "directory": "./"
   },
-  "functions": "./functions",
+  "functions": {
+    "directory": "./functions",
+    "entry": "./functions/api/unlock.js"
+  },
   "installCommand": "",
   "buildCommand": ""
 }
