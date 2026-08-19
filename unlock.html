@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>智能开锁</title>
   <style>
     * {
@@ -86,7 +86,7 @@
 </head>
 <body>
 
-  <div class="address" id="address">🏠 加载中...</div>
+  <div class="address" id="address">🏠 加载地址中...</div>
 
   <button class="unlock-btn" id="unlockBtn" disabled>
     <div class="icon">🔓</div>
@@ -95,26 +95,32 @@
 
   <div id="resultTip" class="result-tip">正在加载服务...</div>
 
+  <script src="SM4.js"></script>
+  <script src="api.js"></script>
   <script>
     const btn = document.getElementById('unlockBtn');
     const btnText = document.getElementById('btnText');
     const resultTip = document.getElementById('resultTip');
-    const addressEl = document.getElementById('address');
 
     function showTip(text, type) {
       resultTip.innerText = text;
-      resultTip.className = 'result-tip' + (type ? ' tip-' + type : '');
+      resultTip.className = 'result-tip';
+      if (type) resultTip.classList.add('tip-' + type);
     }
 
     window.onload = async () => {
       try {
-        showTip('准备就绪，点击开锁', '');
+        showTip('正在初始化服务...', 'loading');
+        
+        // ====================== 只调用一次，完成所有逻辑 ======================
+        await initTokenAndInfo();
+
+        showTip('✅ 准备就绪，点击开锁', '');
         btnText.innerText = '点击开锁';
         btn.disabled = false;
-        addressEl.innerText = '🏠 点击开锁获取地址';
       } catch (e) {
         showTip('❌ 初始化失败：' + e.message, 'error');
-        btn.disabled = true;
+        document.getElementById("address").innerText = '❌ 加载失败';
       }
     };
 
@@ -122,22 +128,16 @@
       if (btn.disabled) return;
       btn.disabled = true;
       btnText.innerText = '处理中...';
-      showTip('正在开门，请稍候...', 'loading');
 
       try {
-        const res = await fetch('/api/unlock', { method: 'POST' });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error);
-
-        addressEl.innerText = '🏠 ' + data.buildingAddr;
+        await doUnlock((msg) => {
+          showTip(msg, 'loading');
+        });
         showTip('✅ 开门成功！', 'success');
         btnText.innerText = '开锁成功';
-        setTimeout(() => {
-          btnText.innerText = '再次开锁';
-          btn.disabled = false;
-        }, 2000);
-      } catch (err) {
-        showTip('❌ ' + err.message, 'error');
+        setTimeout(() => { btnText.innerText = '再次开锁'; btn.disabled = false; }, 2000);
+      } catch (e) {
+        showTip('❌ ' + e.message, 'error');
         btnText.innerText = '重试开锁';
         btn.disabled = false;
       }
