@@ -16,9 +16,9 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      background: #f2f5f8;
       flex-direction: column;
       gap: 15px;
+      background: #f2f5f8;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .address {
@@ -82,6 +82,9 @@
       background: #f0f7ff;
       color: #409eff;
     }
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -95,53 +98,96 @@
 
   <div id="resultTip" class="result-tip">正在加载服务...</div>
 
-  <script src="SM4.js"></script>
-  <script src="api.js"></script>
   <script>
+    // ====================== 配置 ======================
+    const API_BASE = '/api';  // 根据实际部署修改，若 Worker 与 Pages 同域则保持 '/api'
+
     const btn = document.getElementById('unlockBtn');
     const btnText = document.getElementById('btnText');
     const resultTip = document.getElementById('resultTip');
+    const addressEl = document.getElementById('address');
 
+    // ====================== 工具函数 ======================
     function showTip(text, type) {
       resultTip.innerText = text;
       resultTip.className = 'result-tip';
       if (type) resultTip.classList.add('tip-' + type);
     }
 
-    window.onload = async () => {
+    async function apiFetch(path, options = {}) {
+      const url = API_BASE + path;
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`请求失败 (${res.status}): ${errText}`);
+      }
+      return res.json();
+    }
+
+    // ====================== 核心业务 ======================
+    async function init() {
       try {
-        showTip('正在初始化服务...', 'loading');
-        
-        // ====================== 只调用一次，完成所有逻辑 ======================
-        await initTokenAndInfo();
+        showTip('正在检查登录状态...', 'loading');
+        // 1. 获取当前状态（若 Token 无效，Worker 会自动刷新）
+        const status = await apiFetch('/status');
+        if (!status.tokenValid) {
+          // 如果 Token 无效，主动调用登录接口
+          showTip('正在登录...', 'loading');
+          await apiFetch('/login', { method: 'POST' });
+          // 重新获取状态
+          const newStatus = await apiFetch('/status');
+          if (!newStatus.tokenValid) {
+            throw new Error('自动登录失败，请检查账号配置');
+          }
+          addressEl.innerText = '🏠 ' + (newStatus.buildingAddr || '未知地址');
+        } else {
+          addressEl.innerText = '🏠 ' + (status.buildingAddr || '未知地址');
+        }
 
         showTip('✅ 准备就绪，点击开锁', '');
         btnText.innerText = '点击开锁';
         btn.disabled = false;
       } catch (e) {
         showTip('❌ 初始化失败：' + e.message, 'error');
-        document.getElementById("address").innerText = '❌ 加载失败';
+        addressEl.innerText = '❌ 加载失败';
+        btn.disabled = true;
+        btnText.innerText = '重试';
+        // 允许点击重试
+        btn.onclick = () => location.reload();
       }
-    };
+    }
 
-    btn.addEventListener('click', async () => {
+    async function handleUnlock() {
       if (btn.disabled) return;
       btn.disabled = true;
       btnText.innerText = '处理中...';
+      showTip('正在开门...', 'loading');
 
       try {
-        await doUnlock((msg) => {
-          showTip(msg, 'loading');
-        });
-        showTip('✅ 开门成功！', 'success');
+        // 调用开门接口（Worker 内部会自动刷新 Token）
+        const result = await apiFetch('/unlock', { method: 'POST' });
+        showTip('✅ ' + result.message, 'success');
         btnText.innerText = '开锁成功';
-        setTimeout(() => { btnText.innerText = '再次开锁'; btn.disabled = false; }, 2000);
+        setTimeout(() => {
+          btnText.innerText = '再次开锁';
+          btn.disabled = false;
+        }, 2000);
       } catch (e) {
-        showTip('❌ ' + e.message, 'error');
+        showTip('❌ 开门失败：' + e.message, 'error');
         btnText.innerText = '重试开锁';
         btn.disabled = false;
       }
-    });
+    }
+
+    // ====================== 启动 ======================
+    window.onload = init;
+    btn.addEventListener('click', handleUnlock);
   </script>
 </body>
 </html>
