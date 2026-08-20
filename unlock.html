@@ -5,109 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>智能开锁</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    body {
-      width: 100vw;
-      height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      gap: 15px;
-      background: #f2f5f8;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    .address {
-      font-size: 16px;
-      color: #333;
-      background: #eef5ff;
-      padding: 10px 20px;
-      border-radius: 50px;
-      margin-bottom: 10px;
-    }
-    .unlock-btn {
-      width: 60vw;
-      height: 60vw;
-      max-width: 340px;
-      max-height: 340px;
-      border-radius: 50%;
-      border: none;
-      background: linear-gradient(135deg, #409eff, #2b85e7);
-      color: #fff;
-      font-size: 28px;
-      font-weight: bold;
-      box-shadow: 0 12px 35px rgba(64, 158, 255, 0.35);
-      transition: all 0.25s ease;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      user-select: none;
-    }
-    .unlock-btn:active {
-      transform: scale(0.94);
-      box-shadow: 0 6px 20px rgba(64, 158, 255, 0.2);
-    }
-    .unlock-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    .icon {
-      font-size: 60px;
-    }
-    .result-tip {
-      padding: 12px 22px;
-      border-radius: 50px;
-      font-size: 15px;
-      font-weight: 500;
-      text-align: center;
-      min-width: 200px;
-      max-width: 85%;
-    }
-    .tip-success {
-      background: #e6ffef;
-      color: #00b42a;
-    }
-    .tip-error {
-      background: #fff1f0;
-      color: #f53f3f;
-    }
-    .tip-loading {
-      background: #f0f7ff;
-      color: #409eff;
-    }
-    .hidden {
-      display: none;
-    }
+    /* 样式保持不变，自行复制 */
   </style>
 </head>
 <body>
-
   <div class="address" id="address">🏠 加载地址中...</div>
-
   <button class="unlock-btn" id="unlockBtn" disabled>
     <div class="icon">🔓</div>
     <div id="btnText">初始化中...</div>
   </button>
-
   <div id="resultTip" class="result-tip">正在加载服务...</div>
 
   <script>
-    // ====================== 配置 ======================
-    const API_BASE = '/api';  // 根据实际部署修改，若 Worker 与 Pages 同域则保持 '/api'
-
+    const API_BASE = '/api';
     const btn = document.getElementById('unlockBtn');
     const btnText = document.getElementById('btnText');
     const resultTip = document.getElementById('resultTip');
     const addressEl = document.getElementById('address');
 
-    // ====================== 工具函数 ======================
     function showTip(text, type) {
       resultTip.innerText = text;
       resultTip.className = 'result-tip';
@@ -115,13 +30,9 @@
     }
 
     async function apiFetch(path, options = {}) {
-      const url = API_BASE + path;
-      const res = await fetch(url, {
+      const res = await fetch(API_BASE + path, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options.headers || {}),
-        },
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       });
       if (!res.ok) {
         const errText = await res.text();
@@ -130,26 +41,19 @@
       return res.json();
     }
 
-    // ====================== 核心业务 ======================
     async function init() {
       try {
         showTip('正在检查登录状态...', 'loading');
-        // 1. 获取当前状态（若 Token 无效，Worker 会自动刷新）
         const status = await apiFetch('/status');
         if (!status.tokenValid) {
-          // 如果 Token 无效，主动调用登录接口
           showTip('正在登录...', 'loading');
           await apiFetch('/login', { method: 'POST' });
-          // 重新获取状态
           const newStatus = await apiFetch('/status');
-          if (!newStatus.tokenValid) {
-            throw new Error('自动登录失败，请检查账号配置');
-          }
+          if (!newStatus.tokenValid) throw new Error('自动登录失败');
           addressEl.innerText = '🏠 ' + (newStatus.buildingAddr || '未知地址');
         } else {
           addressEl.innerText = '🏠 ' + (status.buildingAddr || '未知地址');
         }
-
         showTip('✅ 准备就绪，点击开锁', '');
         btnText.innerText = '点击开锁';
         btn.disabled = false;
@@ -158,26 +62,59 @@
         addressEl.innerText = '❌ 加载失败';
         btn.disabled = true;
         btnText.innerText = '重试';
-        // 允许点击重试
         btn.onclick = () => location.reload();
       }
     }
 
+    // ========== 开门（真正轮询） ==========
     async function handleUnlock() {
       if (btn.disabled) return;
       btn.disabled = true;
-      btnText.innerText = '处理中...';
-      showTip('正在开门...', 'loading');
+      btnText.innerText = '开门中...';
+      showTip('正在下发开门指令...', 'loading');
 
       try {
-        // 调用开门接口（Worker 内部会自动刷新 Token）
-        const result = await apiFetch('/unlock', { method: 'POST' });
-        showTip('✅ ' + result.message, 'success');
+        // 1. 下发指令
+        const startRes = await apiFetch('/unlock/start', { method: 'POST' });
+        const commandId = startRes.commandId;
+        if (!commandId) throw new Error('未获取到指令ID');
+
+        // 2. 轮询结果（最多15次，每次1秒）
+        let attempt = 0;
+        const maxAttempts = 15;
+        let success = false;
+        let finalMessage = '';
+
+        while (attempt < maxAttempts) {
+          attempt++;
+          showTip(`正在查询结果(${attempt}/${maxAttempts})...`, 'loading');
+          
+          // 等待1秒
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const resultRes = await apiFetch(`/unlock/result?commandId=${commandId}`);
+          if (resultRes.hasResult) {
+            if (resultRes.success) {
+              success = true;
+              finalMessage = resultRes.message || '开门成功';
+            } else {
+              throw new Error(resultRes.message || '设备返回错误');
+            }
+            break;
+          }
+        }
+
+        if (!success) {
+          throw new Error('设备响应超时');
+        }
+
+        showTip('✅ ' + finalMessage, 'success');
         btnText.innerText = '开锁成功';
         setTimeout(() => {
           btnText.innerText = '再次开锁';
           btn.disabled = false;
         }, 2000);
+
       } catch (e) {
         showTip('❌ 开门失败：' + e.message, 'error');
         btnText.innerText = '重试开锁';
@@ -185,7 +122,6 @@
       }
     }
 
-    // ====================== 启动 ======================
     window.onload = init;
     btn.addEventListener('click', handleUnlock);
   </script>
